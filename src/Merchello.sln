@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.30501.0
+# Visual Studio 14
+VisualStudioVersion = 14.0.23107.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Merchello.Core", "Merchello.Core\Merchello.Core.csproj", "{2A83A229-C24B-4D8D-B806-7C9999EB9461}"
 EndProject
@@ -61,10 +61,11 @@ Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "Merchello.Web.UI.Client", "
 		SlnRelativePath = "Merchello.Web.UI.Client\"
 	EndProjectSection
 EndProject
-Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "Merchello.Web.UI", "http://localhost:58400", "{006ABEDC-08B3-4EE4-B6C8-F5B5C68B95F6}"
+Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "Merchello.Web.UI(1)", "http://localhost:58400", "{006ABEDC-08B3-4EE4-B6C8-F5B5C68B95F6}"
 	ProjectSection(WebsiteProperties) = preProject
 		UseIISExpress = "true"
 		TargetFrameworkMoniker = ".NETFramework,Version%3Dv4.5"
+		ProjectReferences = "{2a83a229-c24b-4d8d-b806-7c9999eb9461}|Merchello.Core.dll;{28a665a9-2aad-4230-ab8c-0f0b0f1b2115}|Merchello.Examine.dll;{81d9e7da-5a5a-444a-823f-1d97d7d5fedf}|Merchello.Web.dll;{2b276787-0533-48a3-924e-dd0b3eac0ef0}|Merchello.Bazaar.dll;"
 		Debug.AspNetCompiler.VirtualPath = "/localhost_58400"
 		Debug.AspNetCompiler.PhysicalPath = "Merchello.Web.UI\"
 		Debug.AspNetCompiler.TargetPath = "PrecompiledWeb\localhost_58400\"
@@ -81,6 +82,8 @@ Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "Merchello.Web.UI", "http://
 		Release.AspNetCompiler.Debug = "False"
 		SlnRelativePath = "Merchello.Web.UI\"
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Merchello.Bazaar", "Merchello.Bazaar\Merchello.Bazaar.csproj", "{2B276787-0533-48A3-924E-DD0B3EAC0EF0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -188,6 +191,22 @@ Global
 		{006ABEDC-08B3-4EE4-B6C8-F5B5C68B95F6}.Release|Mixed Platforms.ActiveCfg = Debug|Any CPU
 		{006ABEDC-08B3-4EE4-B6C8-F5B5C68B95F6}.Release|x64.ActiveCfg = Debug|Any CPU
 		{006ABEDC-08B3-4EE4-B6C8-F5B5C68B95F6}.Release|x86.ActiveCfg = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|Mixed Platforms.ActiveCfg = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|Mixed Platforms.Build.0 = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|x64.Build.0 = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Debug|x86.Build.0 = Debug|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|Mixed Platforms.Build.0 = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|x64.ActiveCfg = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|x64.Build.0 = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|x86.ActiveCfg = Release|Any CPU
+		{2B276787-0533-48A3-924E-DD0B3EAC0EF0}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
