@@ -1,7 +1,10 @@
 ﻿namespace Merchello.Core.Persistence.Migrations
 {
     using System;
+    using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
+    using System.Text;
 
     using Merchello.Core.Configuration;
     using Merchello.Core.Events;
@@ -14,6 +17,7 @@
     using umbraco.BusinessLogic;
 
     using Umbraco.Core;
+    using Umbraco.Core.Events;
     using Umbraco.Core.Logging;
     using Umbraco.Core.Persistence;
     using Umbraco.Core.Persistence.Migrations;
@@ -100,6 +104,17 @@
         public event UpgradedEventHandler Upgraded;
 
         /// <summary>
+        /// Gets the logger.
+        /// </summary>
+        public ILogger Logger
+        {
+            get
+            {
+                return _logger;
+            }
+        }
+
+        /// <summary>
         /// Checks the binary version against the web.config configuration status version.
         /// </summary>
         public void EnsureMerchelloVersion()
@@ -120,6 +135,37 @@
             }
         }
 
+
+        /// <summary>
+        /// Ensures the Merchello database has been installed.
+        /// </summary>
+        /// <returns>
+        /// The <see cref="bool"/>.
+        /// </returns>
+        internal bool EnsureDatabase()
+        {
+            var databaseSchemaCreation = new DatabaseSchemaCreation(_database, _logger, new DatabaseSchemaHelper(_database, _logger, _sqlSyntaxProvider), _sqlSyntaxProvider);
+            var schemaResult = databaseSchemaCreation.ValidateSchema();
+            var databaseVersion = schemaResult.DetermineInstalledVersion();
+
+            if (databaseVersion != new Version("0.0.0")) return true;
+            
+            // install the database
+            var schemaHelper = new MerchelloDatabaseSchemaHelper(this._database, this._logger, this._sqlSyntaxProvider);
+            schemaHelper.CreateDatabaseSchema();
+
+            var baseDataCreation = new BaseDataCreation(this._database, this._logger);
+            baseDataCreation.InitializeBaseData("merchTypeField");
+            baseDataCreation.InitializeBaseData("merchInvoiceStatus");
+            baseDataCreation.InitializeBaseData("merchOrderStatus");
+            baseDataCreation.InitializeBaseData("merchWarehouse");
+            baseDataCreation.InitializeBaseData("merchGatewayProviderSettings");
+            baseDataCreation.InitializeBaseData("merchStoreSetting");
+            baseDataCreation.InitializeBaseData("merchShipmentStatus");
+
+            return false;
+        }
+
         /// <summary>
         /// Executes the Migration runner.
         /// </summary>
@@ -135,6 +181,8 @@
             var schemaResult = databaseSchemaCreation.ValidateSchema();
             var dbVersion = schemaResult.DetermineInstalledVersion();
 
+            var upgraded = false;
+
             if (dbVersion != MerchelloVersion.Current)
             {
                 try
@@ -145,15 +193,13 @@
 
                     var migrations = resolver.OrderedUpgradeMigrations(
                         MerchelloConfiguration.ConfigurationStatusVersion,
-                        MerchelloVersion.Current);
+                        MerchelloVersion.Current).ToList();
 
-                    bool upgraded;
+                    var context = InitializeMigrations(migrations, _database, _database.GetDatabaseProvider());
+
                     try
                     {
-                        foreach (var m in migrations)
-                        {
-                            m.Up();
-                        }
+                        ExecuteMigrations(context, _database);
 
                         upgraded = true;
                     }
@@ -162,38 +208,7 @@
                         _logger.Error<CoreMigrationManager>("Merchello migration failed", ex);
                         upgraded = false;
                     }
-
-
-                    //var entryService = ApplicationContext.Current.Services.MigrationEntryService;
-
-
-                    //var runner = new MigrationRunner(
-                    //    entryService,
-                    //    _logger,
-                    //    new SemVersion(MerchelloConfiguration.ConfigurationStatusVersion),
-                    //    new SemVersion(MerchelloVersion.Current),
-                    //    MerchelloConfiguration.MerchelloMigrationName);
-
-                    //var upgraded = runner.Execute(database);
                     
-                    if (upgraded)
-                    {
-                        var migrationKey = this.EnsureMigrationKey(schemaResult);
-
-                        var record = new MigrationRecord()
-                                         {
-                                             MigrationKey = migrationKey,
-                                             CurrentVersion = dbVersion.ToString(),
-                                             TargetVersion = MerchelloVersion.Current.ToString(),
-                                             DbProvider = database.GetDatabaseProvider().ToString(),
-                                             InstallDate = DateTime.Now,
-                                             IsUpgrade = true
-                                         };
-
-                        this.OnUpgraded(record);
-
-                        _logger.Info<CoreMigrationManager>("Merchello Schema Migration completed successfully");
-                    }
 
                     _logger.Debug<CoreMigrationManager>("Merchello migration runner returned false.");
                 }
@@ -203,26 +218,152 @@
                     throw;
                 }
             }
-            else
-            {
-                    // this is a new install                  
-                    var migrationKey = this.EnsureMigrationKey(schemaResult);
 
-                    var record = new MigrationRecord()
-                                     {
-                                         MigrationKey = migrationKey,
-                                         CurrentVersion = MerchelloConfiguration.ConfigurationStatus,
-                                         TargetVersion = MerchelloVersion.Current.ToString(),
-                                         DbProvider = database.GetDatabaseProvider().ToString(),
-                                         InstallDate = DateTime.Now,
-                                         IsUpgrade = !MerchelloConfiguration.ConfigurationStatus.Equals("0.0.0")
-                                     };
-                    this.OnUpgraded(record);
+            var currentVersion = dbVersion.ToString();
+
+            if (!upgraded)
+            {
+                currentVersion = MerchelloConfiguration.ConfigurationStatusVersion.ToString();
             }
-            
+
+            var migrationKey = this.EnsureMigrationKey(schemaResult);
+
+            var record = new MigrationRecord()
+            {
+                MigrationKey = migrationKey,
+                CurrentVersion = currentVersion,
+                TargetVersion = MerchelloVersion.Current.ToString(),
+                DbProvider = database.GetDatabaseProvider().ToString(),
+                InstallDate = DateTime.Now,
+                IsUpgrade = currentVersion != "0.0.0"
+            };
+
+            this.OnUpgraded(record);
+
+            _logger.Info<CoreMigrationManager>("Merchello Schema Migration completed successfully");
+  
             MerchelloConfiguration.ConfigurationStatus = MerchelloVersion.Current.ToString();
 
             return true;
+        }
+
+        /// <summary>
+        /// Initializes the Merchell Migrations.
+        /// </summary>
+        /// <param name="migrations">
+        /// The migrations.
+        /// </param>
+        /// <param name="database">
+        /// The database.
+        /// </param>
+        /// <param name="databaseProvider">
+        /// The database provider.
+        /// </param>
+        /// <param name="isUpgrade">
+        /// The is upgrade.
+        /// </param>
+        /// <returns>
+        /// The <see cref="MerchelloMigrationContext"/>.
+        /// </returns>
+        internal MerchelloMigrationContext InitializeMigrations(List<IMigration> migrations, Database database, DatabaseProviders databaseProvider, bool isUpgrade = true)
+        {
+            //Loop through migrations to generate sql
+            var context = new MerchelloMigrationContext(databaseProvider, database, _logger);
+
+            foreach (var migration in migrations)
+            {
+                var baseMigration = migration as MerchelloMigrationBase;
+                if (baseMigration != null)
+                {
+                    if (isUpgrade)
+                    {
+                        baseMigration.GetUpExpressions(context);
+                        _logger.Info<CoreMigrationManager>(string.Format("Added UPGRADE migration '{0}' to context", baseMigration.GetType().Name));
+                    }
+                    else
+                    {
+                        baseMigration.GetDownExpressions(context);
+                        _logger.Info<CoreMigrationManager>(string.Format("Added DOWNGRADE migration '{0}' to context", baseMigration.GetType().Name));
+                    }
+                }
+                else
+                {
+                    //this is just a normal migration so we can only call Up/Down
+                    if (isUpgrade)
+                    {
+                        migration.Up();
+                        _logger.Info<MigrationRunner>(string.Format("Added UPGRADE migration '{0}' to context", migration.GetType().Name));
+                    }
+                    else
+                    {
+                        migration.Down();
+                        _logger.Info<MigrationRunner>(string.Format("Added DOWNGRADE migration '{0}' to context", migration.GetType().Name));
+                    }
+                }
+            }
+
+            return context;
+        }
+
+
+        private void ExecuteMigrations(IMigrationContext context, Database database)
+        {
+            //Transactional execution of the sql that was generated from the found migrations
+            using (var transaction = database.GetTransaction())
+            {
+                int i = 1;
+                foreach (var expression in context.Expressions)
+                {
+                    var sql = expression.Process(database);
+                    if (string.IsNullOrEmpty(sql))
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    //TODO: We should output all of these SQL calls to files in a migration folder in App_Data/TEMP
+                    // so if people want to executed them manually on another environment, they can.
+
+                    //The following ensures the multiple statement sare executed one at a time, this is a requirement
+                    // of SQLCE, it's unfortunate but necessary.
+                    // http://stackoverflow.com/questions/13665491/sql-ce-inconsistent-with-multiple-statements
+                    var sb = new StringBuilder();
+                    using (var reader = new StringReader(sql))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            line = line.Trim();
+                            if (line.Equals("GO", StringComparison.OrdinalIgnoreCase))
+                            {
+                                //Execute the SQL up to the point of a GO statement
+                                var exeSql = sb.ToString();
+                                _logger.Info<MigrationRunner>("Executing sql statement " + i + ": " + exeSql);
+                                database.Execute(exeSql);
+
+                                //restart the string builder
+                                sb.Remove(0, sb.Length);
+                            }
+                            else
+                            {
+                                sb.AppendLine(line);
+                            }
+                        }
+                        //execute anything remaining
+                        if (sb.Length > 0)
+                        {
+                            var exeSql = sb.ToString();
+                            _logger.Info<MigrationRunner>("Executing sql statement " + i + ": " + exeSql);
+                            database.Execute(exeSql);
+                        }
+                    }
+
+                    i++;
+                }
+
+                transaction.Complete();
+
+            }
         }
 
         /// <summary>

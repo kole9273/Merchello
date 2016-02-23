@@ -14,8 +14,10 @@
 
     using Umbraco.Core;
     using Umbraco.Core.Cache;
+    using Umbraco.Core.Logging;
     using Umbraco.Core.Persistence;
     using Umbraco.Core.Persistence.Querying;
+    using Umbraco.Core.Persistence.SqlSyntax;
 
     /// <summary>
     /// The product repository.
@@ -39,8 +41,14 @@
         /// <param name="productVariantRepository">
         /// The product variant repository.
         /// </param>
-        public ProductRepository(IDatabaseUnitOfWork work, IRuntimeCacheProvider cache, IProductVariantRepository productVariantRepository)
-            : base(work, cache)
+        /// <param name="logger">
+        /// The logger.
+        /// </param>
+        /// <param name="sqlSyntax">
+        /// The SQL Syntax.
+        /// </param>
+        public ProductRepository(IDatabaseUnitOfWork work, IRuntimeCacheProvider cache, IProductVariantRepository productVariantRepository, ILogger logger, ISqlSyntaxProvider sqlSyntax)
+            : base(work, cache, logger, sqlSyntax)
         {
            Mandate.ParameterNotNull(productVariantRepository, "productVariantRepository");
            _productVariantRepository = productVariantRepository;        
@@ -103,7 +111,7 @@
         /// The sort direction.
         /// </param>
         /// <returns>
-        /// The <see cref="Page"/>.
+        /// The <see cref="Page{Guid}"/>.
         /// </returns>
         public override Page<Guid> GetPagedKeys(long page, long itemsPerPage, IQuery<IProduct> query, string orderExpression, SortDirection sortDirection = SortDirection.Descending)
         {
@@ -541,7 +549,7 @@
         /// The sort direction.
         /// </param>
         /// <returns>
-        /// The <see cref="Page"/>.
+        /// The <see cref="Page{Guid}"/>.
         /// </returns>
         public Page<Guid> GetProductsKeysByManufacturer(
             IEnumerable<string> manufacturer,
@@ -664,7 +672,7 @@
                .Append("INNER JOIN [merchCatalogInventory]")
                .Append("ON	[merchProductVariant].[pk] = [merchCatalogInventory].[productVariantKey]")
                .Append("WHERE ([merchCatalogInventory].[count] > 0 AND [merchProductVariant].[trackInventory] = 1)")
-               .Append("OR [merchProductVaraint].[trackInventory] = 0")
+               .Append("OR [merchProductVariant].[trackInventory] = 0")
                .Append(") [merchProductVariant]")
                .Append(")")
                .Append("AND [merchProductVariant].[master] = 1");
@@ -1137,11 +1145,11 @@
         {
             var sql = new Sql();
             sql.Select(isCount ? "COUNT(*)" : "*")
-               .From<ProductDto>()
-               .InnerJoin<ProductVariantDto>()
-               .On<ProductDto, ProductVariantDto>(left => left.Key, right => right.ProductKey)
-               .InnerJoin<ProductVariantIndexDto>()
-               .On<ProductVariantDto, ProductVariantIndexDto>(left => left.Key, right => right.ProductVariantKey)
+               .From<ProductDto>(SqlSyntax)
+               .InnerJoin<ProductVariantDto>(SqlSyntax)
+               .On<ProductDto, ProductVariantDto>(SqlSyntax, left => left.Key, right => right.ProductKey)
+               .InnerJoin<ProductVariantIndexDto>(SqlSyntax)
+               .On<ProductVariantDto, ProductVariantIndexDto>(SqlSyntax, left => left.Key, right => right.ProductVariantKey)
                .Where<ProductVariantDto>(x => x.Master);
 
             return sql;
@@ -1337,11 +1345,11 @@
         {
             var sql = new Sql();
             sql.Select("*")
-               .From<ProductOptionDto>()
-               .InnerJoin<Product2ProductOptionDto>()
-               .On<ProductOptionDto, Product2ProductOptionDto>(left => left.Key, right => right.OptionKey)
+               .From<ProductOptionDto>(SqlSyntax)
+               .InnerJoin<Product2ProductOptionDto>(SqlSyntax)
+               .On<ProductOptionDto, Product2ProductOptionDto>(SqlSyntax, left => left.Key, right => right.OptionKey)
                .Where<Product2ProductOptionDto>(x => x.ProductKey == productKey)
-               .OrderBy<Product2ProductOptionDto>(x => x.SortOrder);
+               .OrderBy<Product2ProductOptionDto>(x => x.SortOrder, SqlSyntax);
 
             var dtos = Database.Fetch<ProductOptionDto, Product2ProductOptionDto>(sql);
 
@@ -1416,7 +1424,12 @@
             var resetSorts = false;
             foreach (var ex in existing)
             {
-                if (!product.ProductOptions.Contains(ex.Name))
+                // Von: Options with duplicate names are allowed and because of that this check will not work.
+                //      If there are more than one options with the same name and one of those is removed on the back-end,
+                //      it will not be deleted from the database because there are still existing options with the same name.
+                //      So let's test by PK since the PKs are (and "should" be) passed from the DB (or cache) to the back-end UI.
+                //if (!product.ProductOptions.Contains(ex.Name))
+                if (!product.ProductOptions.Contains(ex.Key))
                 {
                     DeleteProductOption(ex);
                     resetSorts = true;
@@ -1509,7 +1522,7 @@
         {
             var sql = new Sql();
             sql.Select("*")
-               .From<ProductAttributeDto>()
+               .From<ProductAttributeDto>(SqlSyntax)
                .Where<ProductAttributeDto>(x => x.OptionKey == optionKey);
 
             var dtos = Database.Fetch<ProductAttributeDto>(sql);
@@ -1565,7 +1578,19 @@
             var resetSorts = false;
             foreach (var ex in existing)
             {
-                if (productOption.Choices.Contains(ex.Sku)) continue;
+                //// Von: Duplicate SKU is not allowed in the system. However, 
+                ////      there could be custom implementation where SKUs are generated based on some logic.
+                ////      That could lead into a timing issue where the name of the attribute is not the same as with its SKU.
+                ////      "Ideally" the logic should be put in correct event but it's easy to miss that.
+                ////      So this change will ensure that even if that timing is off,
+                ////      we will still not remove attributes unnecessarily.
+                ////if (productOption.Choices.Contains(ex.Sku)) continue;
+
+                //// TODO RSS:  We still need to validate SKU integrity so that we do not create an issue when generating the product variants.
+                ////            We need to add the ability to change the attribute SKU via the back office with a UI change anyway so we'll look at this
+                ////            again at that time.
+
+                if (productOption.Choices.Contains(ex.Key)) continue;
                 DeleteProductAttribute(ex);
                 resetSorts = true;
             }
@@ -1581,10 +1606,19 @@
                 }
             }
 
+            // We need to save now the correct ordering so the display on the UI will be correct.
+            // The attributes in "all" options are assigned sort orders that are off.
+            // For example the Color Red is given an order of 10 and the Size 2 is given an order of 5.
+            // If Color is ordered first than the Size then we should have "Red" first then "2".
+            // But since the ordering is taken from the attribute order then we have a wrong display.
+            // Let's use the options sortOrder as an offset to have a correct attributes ordering.      
+            var attributeSortOrderOffset = productOption.SortOrder * 100;
             foreach (var att in productOption.Choices.OrderBy(x => x.SortOrder))
             {
                 // ensure the id is set
                 att.OptionKey = productOption.Key;
+                // adjust the ordering of attributes
+                att.SortOrder = attributeSortOrderOffset + att.SortOrder;
                 SaveProductAttribute(att);
             }
 
@@ -1640,7 +1674,7 @@
 
 
             var sql = new Sql();
-            sql.Select("*").From<ProductVariantDto>();
+            sql.Select("*").From<ProductVariantDto>(SqlSyntax);
 
             if (terms.Any())
             {

@@ -8,9 +8,11 @@
      */
     angular.module('merchello').controller('Merchello.Backoffice.CustomerOverviewController',
         ['$scope', '$q', '$log', '$routeParams', '$timeout', '$filter', 'dialogService', 'notificationsService', 'localizationService', 'gravatarService', 'settingsResource', 'invoiceHelper', 'merchelloTabsFactory', 'dialogDataFactory',
-            'customerResource', 'customerDisplayBuilder', 'countryDisplayBuilder', 'currencyDisplayBuilder', 'settingDisplayBuilder', 'invoiceResource', 'invoiceDisplayBuilder',
+            'customerResource', 'backOfficeCheckoutResource', 'customerDisplayBuilder', 'countryDisplayBuilder', 'currencyDisplayBuilder', 'settingDisplayBuilder', 'invoiceResource', 'invoiceDisplayBuilder', 'customerAddressDisplayBuilder',
+            'itemCacheInstructionBuilder', 'addToItemCacheInstructionBuilder',
         function($scope, $q, $log, $routeParams, $timeout, $filter, dialogService, notificationsService, localizationService, gravatarService, settingsResource, invoiceHelper, merchelloTabsFactory, dialogDataFactory,
-                 customerResource, customerDisplayBuilder, countryDisplayBuilder, currencyDisplayBuilder, settingDisplayBuilder, invoiceResource, invoiceDisplayBuilder) {
+                 customerResource, backOfficeCheckoutResource, customerDisplayBuilder, countryDisplayBuilder, currencyDisplayBuilder, settingDisplayBuilder, invoiceResource, invoiceDisplayBuilder, customerAddressDisplayBuilder,
+                 itemCacheInstructionBuilder, addToItemCacheInstructionBuilder) {
 
             $scope.loaded = false;
             $scope.preValuesLoaded = false;
@@ -25,6 +27,12 @@
             $scope.listViewEntityType = 'SalesHistory';
 
             // exposed methods
+            $scope.moveToWishList = moveToWishList;
+            $scope.moveToBasket = moveToBasket;
+            $scope.removeFromItemCache = removeFromItemCache;
+            $scope.editItemCacheItem = editItemCacheItem;
+            $scope.addToItemCache = addToItemCache;
+
             $scope.getCurrency = getCurrency;
             $scope.openEditInfoDialog = openEditInfoDialog;
             $scope.openDeleteCustomerDialog = openDeleteCustomerDialog;
@@ -80,6 +88,7 @@
                     open = value;
                 });
                 loadCustomer(key);
+
             }
 
             /**
@@ -141,6 +150,90 @@
                 });
             }
 
+            function addToItemCache(items, itemCacheType) {
+                var instruction = addToItemCacheInstructionBuilder.createDefault();
+                instruction.customerKey = $scope.customer.key;
+                instruction.items = items;
+                instruction.itemCacheType = itemCacheType;
+                backOfficeCheckoutResource.addItemCacheItem(instruction).then(function() {
+                    loadCustomer($scope.customer.key);
+                });
+            }
+
+            function removeFromItemCache(lineItem, itemCacheType) {
+                var dialogData = {};
+                dialogData.name = lineItem.name;
+                dialogData.lineItem = lineItem;
+                dialogData.itemCacheType = itemCacheType;
+                dialogService.open({
+                    template: '/App_Plugins/Merchello/Backoffice/Merchello/Dialogs/delete.confirmation.html',
+                    show: true,
+                    callback: processRemoveFromItemCache,
+                    dialogData: dialogData
+                });
+
+            }
+
+            function processRemoveFromItemCache(dialogData) {
+                var instruction = itemCacheInstructionBuilder.createDefault();
+                instruction.customerKey = $scope.customer.key;
+                instruction.entityKey = dialogData.lineItem.key;
+                instruction.itemCacheType = dialogData.itemCacheType;
+                console.info(instruction);
+                backOfficeCheckoutResource.removeItemCacheItem(instruction).then(function() {
+                    loadCustomer($scope.customer.key);
+                });
+            }
+
+            function editItemCacheItem(lineItem, itemCacheType) {
+                var dialogData = {};
+                dialogData.name = lineItem.name;
+                dialogData.lineItem = lineItem;
+                dialogData.itemCacheType = itemCacheType;
+
+                dialogService.open({
+                    template: '/App_Plugins/Merchello/Backoffice/Merchello/Dialogs/customer.itemcachelineitem.quantity.html',
+                    show: true,
+                    callback: processEditItemCacheItem,
+                    dialogData: dialogData
+                });
+            }
+
+            function processEditItemCacheItem(dialogData) {
+                var instruction = itemCacheInstructionBuilder.createDefault();
+                instruction.customerKey = $scope.customer.key;
+                instruction.entityKey = dialogData.lineItem.key;
+                instruction.quantity = dialogData.lineItem.quantity;
+                instruction.itemCacheType = dialogData.itemCacheType;
+                console.info(instruction);
+                backOfficeCheckoutResource.updateLineItemQuantity(instruction).then(function() {
+                    loadCustomer($scope.customer.key);
+                });
+
+            }
+
+            function moveToWishList(lineItem) {
+                var instruction = itemCacheInstructionBuilder.createDefault();
+                instruction.customerKey = $scope.customer.key;
+                instruction.entityKey = lineItem.key;
+                instruction.itemCacheType = 'Basket';
+                backOfficeCheckoutResource.moveToWishlist(instruction).then(function() {
+                    loadCustomer($scope.customer.key);
+                });
+
+            }
+
+            function moveToBasket(lineItem) {
+                var instruction = itemCacheInstructionBuilder.createDefault();
+                instruction.customerKey = $scope.customer.key;
+                instruction.entityKey = lineItem.key;
+                instruction.itemCacheType = 'Wishlist';
+
+                backOfficeCheckoutResource.moveToBasket(instruction).then(function() {
+                    loadCustomer($scope.customer.key);
+                });
+            }
+
             function load(query) {
                 var deferred = $q.defer();
                 query.addCustomerKeyParam($scope.customer.key);
@@ -154,7 +247,11 @@
             function getColumnValue(result, col) {
                 switch(col.name) {
                     case 'invoiceNumber':
-                        return '<a href="' + getEditUrl(result) + '">' + result.invoiceNumber + '</a>';
+                        if (result.invoiceNumberPrefix !== '') {
+                            return '<a href="' + getEditUrl(result) + '">' + result.invoiceNumberPrefix + '-' + result.invoiceNumber + '</a>';
+                        } else {
+                            return '<a href="' + getEditUrl(result) + '">' + result.invoiceNumber + '</a>';
+                        }
                     case 'invoiceDate':
                         return $filter('date')(result.invoiceDate, $scope.settings.dateFormat);
                     case 'paymentStatus':
@@ -258,7 +355,7 @@
                     dialogData.customerAddress = customerAddressDisplayBuilder.createDefault();
                     dialogData.selectedCountry = countries[0];
                 } else {
-                    dialogData.customerAddress = address;
+                    dialogData.customerAddress = angular.extend(customerAddressDisplayBuilder.createDefault(), address);
                     dialogData.selectedCountry = address.countryCode === '' ? countries[0] :
                         _.find(countries, function(country) {
                         return country.countryCode === address.countryCode;

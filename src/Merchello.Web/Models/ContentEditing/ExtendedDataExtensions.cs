@@ -1,5 +1,6 @@
 ﻿namespace Merchello.Web.Models.ContentEditing
 {
+    using System;
     using System.Globalization;
 
     using Merchello.Core;
@@ -39,5 +40,46 @@
             extendedData.SetValue(Constants.ExtendedDataKeys.DownloadMediaId, productVariant.DownloadMediaId.ToString(CultureInfo.InvariantCulture));
             extendedData.SetValue(Constants.ExtendedDataKeys.VersionKey, productVariant.VersionKey.ToString());
         }
+
+        #region INote
+
+        /// <summary>
+        /// Adds an <see cref="NoteDisplay"/> to extended data.  This is intended for a note against the sale (delivery instructions, etc)
+        /// </summary>
+        /// <param name="extendedData">
+        /// The extended Data.
+        /// </param>
+        /// <param name="note">
+        /// The note.
+        /// </param>
+        public static void AddNote(this ExtendedDataCollection extendedData, NoteDisplay note)
+        {
+            var noteXml = SerializationHelper.SerializeToXml(note as NoteDisplay);
+
+            extendedData.SetValue(Constants.ExtendedDataKeys.Note, noteXml);
+        }
+
+        /// <summary>
+        /// The get note.
+        /// </summary>
+        /// <param name="extendedData">
+        /// The extended data.
+        /// </param>
+        /// <returns>
+        /// The <see cref="NoteDisplay"/>.
+        /// </returns>
+        [Obsolete("Use ICheckoutManager.Extended.GetNotes - returns IEnumerable<string>")]
+        public static NoteDisplay GetNote(this ExtendedDataCollection extendedData)
+        {
+            if (!extendedData.ContainsKey(Constants.ExtendedDataKeys.Note)) return null;
+
+            var attempt = SerializationHelper.DeserializeXml<NoteDisplay>(extendedData.GetValue(Constants.ExtendedDataKeys.Note));
+
+            return attempt.Success ? attempt.Result : null;
+        }
+
+
+        #endregion
+
     }
 }

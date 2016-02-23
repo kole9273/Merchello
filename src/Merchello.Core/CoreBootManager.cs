@@ -3,6 +3,7 @@
     using System;
     using System.Configuration;
     using System.Diagnostics.CodeAnalysis;
+    using System.Linq;
 
     using Cache;
     using Configuration;
@@ -13,13 +14,22 @@
     using Merchello.Core.Events;
     using Merchello.Core.Marketing.Offer;
     using Merchello.Core.Persistence;
+    using Merchello.Core.Persistence.Migrations;
+    using Merchello.Core.Persistence.Migrations.Analytics;
+    using Merchello.Core.Persistence.Migrations.Initial;
 
     using Observation;
     using Persistence.UnitOfWork;
     using Services;
 
+    using umbraco.BusinessLogic;
+
     using Umbraco.Core;
     using Umbraco.Core.Logging;
+    using Umbraco.Core.Persistence;
+    using Umbraco.Core.Persistence.SqlSyntax;
+
+    using RepositoryFactory = Merchello.Core.Persistence.RepositoryFactory;
 
     /// <summary>
     /// Application boot strap for the Merchello Plugin which initializes all objects to be used in the Merchello Core
@@ -32,14 +42,19 @@
         #region Fields
 
         /// <summary>
+        /// The logger.
+        /// </summary>
+        private readonly ILogger _logger;
+
+        /// <summary>
+        /// The _sql syntax provider.
+        /// </summary>
+        private readonly ISqlSyntaxProvider _sqlSyntaxProvider;
+
+        /// <summary>
         /// The timer.
         /// </summary>
         private DisposableTimer _timer;
-
-        /// <summary>
-        /// The logger.
-        /// </summary>
-        private ILogger _logger;
 
         /// <summary>
         /// The is complete.
@@ -65,10 +80,18 @@
         /// <param name="logger">
         /// The logger.
         /// </param>
-        internal CoreBootManager(ILogger logger)
+        /// <param name="sqlSyntaxProvider">
+        /// The <see cref="ISqlSyntaxProvider"/>.
+        /// </param>
+        internal CoreBootManager(ILogger logger, ISqlSyntaxProvider sqlSyntaxProvider)
         {
             Mandate.ParameterNotNull(logger, "Logger");
+            Mandate.ParameterNotNull(sqlSyntaxProvider, "sqlSyntaxProvider");
+
             _logger = logger;
+            _sqlSyntaxProvider = sqlSyntaxProvider;
+
+            SetUnitOfWorkProvider();
         }
 
         /// <summary>
@@ -85,6 +108,28 @@
         /// Gets or sets a value indicating whether or not this is a unit test
         /// </summary>
         internal bool IsUnitTest { get; set; }
+
+        /// <summary>
+        /// Gets the logger.
+        /// </summary>
+        internal ILogger Logger
+        {
+            get
+            {
+                return _logger;
+            }
+        }
+
+        /// <summary>
+        /// Gets the sql syntax.
+        /// </summary>
+        internal ISqlSyntaxProvider SqlSyntax
+        {
+            get
+            {
+                return _sqlSyntaxProvider;
+            }
+        }
 
         /// <summary>
         /// The initialize.
@@ -104,15 +149,9 @@
 
             //_timer = DisposableTimer.DebugDuration<CoreBootManager>("Merchello starting", "Merchello startup complete");
  
-            // create the service context for the MerchelloAppContext   
-            var connString = ConfigurationManager.ConnectionStrings[MerchelloConfiguration.Current.Section.DefaultConnectionStringName].ConnectionString;
-            var providerName = ConfigurationManager.ConnectionStrings[MerchelloConfiguration.Current.Section.DefaultConnectionStringName].ProviderName;
-
-            AutoMapperMappings.CreateMappings();            
-
-            _unitOfWorkProvider = new PetaPocoUnitOfWorkProvider(_logger, connString, providerName);
-
-            var serviceContext = new ServiceContext(new RepositoryFactory(), _unitOfWorkProvider, _logger, new TransientMessageFactory());
+            // create the service context for the MerchelloAppContext          
+            
+            var serviceContext = new ServiceContext(new RepositoryFactory(_logger, _sqlSyntaxProvider), _unitOfWorkProvider, _logger, new TransientMessageFactory());
 
 
             var cache = ApplicationContext.Current == null
@@ -181,8 +220,8 @@
             _isComplete = true;
 
             return this;
-        }  
-       
+        }
+
         /// <summary>
         /// Creates the MerchelloPluginContext (singleton)
         /// </summary>
@@ -234,6 +273,18 @@
         }
 
         /// <summary>
+        /// Gets the database.
+        /// </summary>
+        /// <returns>
+        /// The <see cref="Database"/>.
+        /// </returns>
+        protected Database GetDatabase()
+        {
+            if (_unitOfWorkProvider == null) throw new NullReferenceException("Unit of work provider has not been set");
+            return _unitOfWorkProvider.GetUnitOfWork().Database;
+        }
+
+        /// <summary>
         /// Responsible for the special case initialization of the gateway resolver.
         /// </summary>
         /// <param name="serviceContext">
@@ -248,6 +299,8 @@
         /// </remarks>
         private void InitializeGatewayResolver(IServiceContext serviceContext, CacheHelper cache)
         {
+            _logger.Info<CoreBootManager>("Initializing Merchello GatewayResolver");
+
             if (!GatewayProviderResolver.HasCurrent)
                 GatewayProviderResolver.Current = new GatewayProviderResolver(
                 PluginManager.Current.ResolveGatewayProviders(),
@@ -271,6 +324,16 @@
                    PluginManager.Current.ResolveEnityCollectionProviders(),
                    merchelloContext);                 
             }
+        }
+
+        /// <summary>
+        /// Sets up unit of work provider.
+        /// </summary>
+        private void SetUnitOfWorkProvider()
+        {
+            var connString = ConfigurationManager.ConnectionStrings[MerchelloConfiguration.Current.Section.DefaultConnectionStringName].ConnectionString;
+            var providerName = ConfigurationManager.ConnectionStrings[MerchelloConfiguration.Current.Section.DefaultConnectionStringName].ProviderName;
+            _unitOfWorkProvider = new PetaPocoUnitOfWorkProvider(_logger, connString, providerName);
         }
     }
 }

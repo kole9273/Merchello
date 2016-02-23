@@ -3,6 +3,7 @@
     using System;
     using System.Linq;
     using System.Reflection;
+    using System.Threading;
 
     using log4net;
     using Core;
@@ -13,9 +14,13 @@
     using Core.Sales;
     using Core.Services;
 
+    using Merchello.Core.Checkout;
     using Merchello.Core.Gateways.Taxation;
     using Merchello.Core.Models.DetachedContent;
+    using Merchello.Core.Persistence.Migrations;
+    using Merchello.Core.Persistence.Migrations.Initial;
     using Merchello.Web.Routing;
+    using Merchello.Web.Workflow;
 
     using Models.SaleHistory;
 
@@ -23,6 +28,7 @@
     using Umbraco.Core.Events;
     using Umbraco.Core.Logging;
     using Umbraco.Core.Models;
+    using Umbraco.Core.Persistence;
     using Umbraco.Core.Services;
     using Umbraco.Web.Routing;
 
@@ -45,6 +51,20 @@
         private static bool merchelloIsStarted = false;
 
         /// <summary>
+        /// The application initialized.
+        /// </summary>
+        /// <param name="umbracoApplication">
+        /// The <see cref="UmbracoApplicationBase"/>.
+        /// </param>
+        /// <param name="applicationContext">
+        /// The <see cref="ApplicationContext"/>.
+        /// </param>
+        protected override void ApplicationInitialized(UmbracoApplicationBase umbracoApplication, ApplicationContext applicationContext)
+        {
+            base.ApplicationInitialized(umbracoApplication, applicationContext);
+        }
+
+        /// <summary>
         /// The Umbraco Application Starting event.
         /// </summary>
         /// <param name="umbracoApplication">
@@ -59,10 +79,10 @@
 
             BootManagerBase.MerchelloStarted += BootManagerBaseOnMerchelloStarted;
 
-            // Initialize Merchello
-            Log.Info("Attempting to initialize Merchello");
             try
             {
+                // Initialize Merchello
+                Log.Info("Attempting to initialize Merchello");
                 MerchelloBootstrapper.Init(new WebBootManager());
                 Log.Info("Initialization of Merchello complete");                
             }
@@ -92,6 +112,7 @@
             MemberService.Saving += this.MemberServiceOnSaving;
 
             SalePreparationBase.Finalizing += SalePreparationBaseOnFinalizing;
+            CheckoutPaymentManagerBase.Finalizing += CheckoutPaymentManagerBaseOnFinalizing;
 
             InvoiceService.Deleted += InvoiceServiceOnDeleted;
             OrderService.Deleted += OrderServiceOnDeleted;
@@ -107,23 +128,33 @@
 
             ShipmentService.StatusChanged += ShipmentServiceOnStatusChanged;
 
+            // Basket conversion
+            BasketConversionBase.Converted += OnBasketConverted;
+
             // Detached Content
-            //LocalizationService.SavedLanguage += LocalizationServiceOnSavedLanguage;
-            //LocalizationService.DeletedLanguage += LocalizationServiceOnDeletedLanguage;
             DetachedContentTypeService.Deleting += DetachedContentTypeServiceOnDeleting;
 
             if (merchelloIsStarted) this.VerifyMerchelloVersion();
         }
 
-        //private void LocalizationServiceOnDeletedLanguage(ILocalizationService sender, DeleteEventArgs<ILanguage> deleteEventArgs)
-        //{
-        //    throw new NotImplementedException();
-        //}
-
-        //private void LocalizationServiceOnSavedLanguage(ILocalizationService sender, SaveEventArgs<ILanguage> saveEventArgs)
-        //{
-        //    throw new NotImplementedException();
-        //}
+        /// <summary>
+        /// Updates the customer's last activity date after the basket has been converted
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void OnBasketConverted(BasketConversionBase sender, ConvertEventArgs<BasketConversionPair> e)
+        {
+            foreach (var pair in e.CovertedEntities.ToArray())
+            {
+                var customer = (ICustomer)pair.CustomerBasket.Customer;
+                customer.LastActivityDate = DateTime.Now;
+                MerchelloContext.Current.Services.CustomerService.Save(customer);
+            }
+        }
 
         /// <summary>
         /// Registers Merchello content finders.
@@ -321,9 +352,43 @@
         /// <param name="salesPreparationEventArgs">
         /// The sales preparation event args.
         /// </param>
+        /// TODO RSS remove this when SalePreparation is removed
+        [Obsolete]
         private void SalePreparationBaseOnFinalizing(SalePreparationBase sender, SalesPreparationEventArgs<IPaymentResult> salesPreparationEventArgs)
         {
             var result = salesPreparationEventArgs.Entity;
+
+            result.Invoice.AuditCreated();
+
+            if (result.Payment.Success)
+            {
+                if (result.Invoice.InvoiceStatusKey == Core.Constants.DefaultKeys.InvoiceStatus.Paid)
+                {
+                    result.Payment.Result.AuditPaymentCaptured(result.Payment.Result.Amount);
+                }
+                else
+                {
+                    result.Payment.Result.AuditPaymentAuthorize(result.Invoice);
+                }
+            }
+            else
+            {
+                result.Payment.Result.AuditPaymentDeclined();
+            }
+        }
+
+        /// <summary>
+        /// The checkout payment manager base on finalizing.
+        /// </summary>
+        /// <param name="sender">
+        /// The sender.
+        /// </param>
+        /// <param name="e">
+        /// The e.
+        /// </param>
+        private void CheckoutPaymentManagerBaseOnFinalizing(CheckoutPaymentManagerBase sender, CheckoutEventArgs<IPaymentResult> e)
+        {
+            var result = e.Item;
 
             result.Invoice.AuditCreated();
 
@@ -407,10 +472,11 @@
         private void VerifyMerchelloVersion()
         {
             LogHelper.Info<UmbracoApplicationEventHandler>("Verifying Merchello Version.");
-            var migrationManager = new WebMigrationManager();
-            migrationManager.Upgraded += MigrationManagerOnUpgraded;
-            migrationManager.EnsureMerchelloVersion();
+            var manager = new WebMigrationManager();
+            manager.Upgraded += MigrationManagerOnUpgraded;
+            manager.EnsureMerchelloVersion();
         }
+
 
         /// <summary>
         /// The migration manager on upgraded.

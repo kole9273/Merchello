@@ -13,8 +13,10 @@
 
     using Umbraco.Core;
     using Umbraco.Core.Cache;
+    using Umbraco.Core.Logging;
     using Umbraco.Core.Persistence;
     using Umbraco.Core.Persistence.Querying;
+    using Umbraco.Core.Persistence.SqlSyntax;
 
     /// <summary>
     /// Represents the Invoice Repository
@@ -32,6 +34,11 @@
         private readonly IOrderRepository _orderRepository;
 
         /// <summary>
+        /// The note repository.
+        /// </summary>
+        private readonly INoteRepository _noteRepository;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="InvoiceRepository"/> class.
         /// </summary>
         /// <param name="work">
@@ -46,14 +53,32 @@
         /// <param name="orderRepository">
         /// The order repository.
         /// </param>
-        public InvoiceRepository(IDatabaseUnitOfWork work, IRuntimeCacheProvider cache, IInvoiceLineItemRepository invoiceLineItemRepository, IOrderRepository orderRepository) 
-            : base(work, cache)
+        /// <param name="noteRepository">
+        /// The note Repository.
+        /// </param>
+        /// <param name="logger">
+        /// The logger.
+        /// </param>
+        /// <param name="sqlSyntax">
+        /// The SQL Syntax
+        /// </param>
+        public InvoiceRepository(
+            IDatabaseUnitOfWork work,
+            IRuntimeCacheProvider cache,
+            IInvoiceLineItemRepository invoiceLineItemRepository,
+            IOrderRepository orderRepository,
+            INoteRepository noteRepository,
+            ILogger logger,
+            ISqlSyntaxProvider sqlSyntax)
+            : base(work, cache, logger, sqlSyntax)
         {
             Mandate.ParameterNotNull(invoiceLineItemRepository, "lineItemRepository");
             Mandate.ParameterNotNull(orderRepository, "orderRepository");
+            Mandate.ParameterNotNull(noteRepository, "noteRepository");
 
             _invoiceLineItemRepository = invoiceLineItemRepository;
             _orderRepository = orderRepository;
+            _noteRepository = noteRepository;
         }
 
         /// <summary>
@@ -77,7 +102,12 @@
         /// <returns>
         /// The <see cref="Page{Guid}"/>.
         /// </returns>
-        public override Page<Guid> SearchKeys(string searchTerm, long page, long itemsPerPage, string orderExpression, SortDirection sortDirection = SortDirection.Descending)
+        public override Page<Guid> SearchKeys(
+            string searchTerm,
+            long page,
+            long itemsPerPage,
+            string orderExpression,
+            SortDirection sortDirection = SortDirection.Descending)
         {
             var sql = BuildInvoiceSearchSql(searchTerm);
 
@@ -111,7 +141,14 @@
         /// <returns>
         /// The <see cref="Page{Guid}"/>.
         /// </returns>
-        public Page<Guid> SearchKeys(string searchTerm, DateTime startDate, DateTime endDate, long page, long itemsPerPage, string orderExpression, SortDirection sortDirection = SortDirection.Descending)
+        public Page<Guid> SearchKeys(
+            string searchTerm,
+            DateTime startDate,
+            DateTime endDate,
+            long page,
+            long itemsPerPage,
+            string orderExpression,
+            SortDirection sortDirection = SortDirection.Descending)
         {
             var sql = BuildInvoiceSearchSql(searchTerm);
             sql.Where("invoiceDate BETWEEN @start AND @end", new { @start = startDate, @end = endDate });
@@ -126,7 +163,9 @@
         /// </returns>
         public int GetMaxDocumentNumber()
         {
-            var value = Database.ExecuteScalar<object>("SELECT TOP 1 invoiceNumber FROM merchInvoice ORDER BY invoiceNumber DESC");
+            var value =
+                Database.ExecuteScalar<object>(
+                    "SELECT TOP 1 invoiceNumber FROM merchInvoice ORDER BY invoiceNumber DESC");
             return value == null ? 0 : int.Parse(value.ToString());
         }
 
@@ -170,12 +209,12 @@
             if (this.ExistsInCollection(entityKey, collectionKey)) return;
 
             var dto = new Invoice2EntityCollectionDto()
-            {
-                InvoiceKey = entityKey,
-                EntityCollectionKey = collectionKey,
-                CreateDate = DateTime.Now,
-                UpdateDate = DateTime.Now
-            };
+                          {
+                              InvoiceKey = entityKey,
+                              EntityCollectionKey = collectionKey,
+                              CreateDate = DateTime.Now,
+                              UpdateDate = DateTime.Now
+                          };
 
             Database.Insert(dto);
         }
@@ -195,7 +234,6 @@
                 "DELETE [merchInvoice2EntityCollection] WHERE [merchInvoice2EntityCollection].[invoiceKey] = @ikey AND [merchInvoice2EntityCollection].[entityCollectionKey] = @eckey",
                 new { @ikey = entityKey, @eckey = collectionKey });
         }
-
 
         /// <summary>
         /// The get invoice keys from collection.
@@ -227,12 +265,14 @@
         {
             var sql = new Sql();
             sql.Append("SELECT *")
-              .Append("FROM [merchInvoice]")
-               .Append("WHERE [merchInvoice].[pk] IN (")
-               .Append("SELECT DISTINCT([invoiceKey])")
-               .Append("FROM [merchInvoice2EntityCollection]")
-               .Append("WHERE [merchInvoice2EntityCollection].[entityCollectionKey] = @eckey", new { @eckey = collectionKey })
-               .Append(")");
+                .Append("FROM [merchInvoice]")
+                .Append("WHERE [merchInvoice].[pk] IN (")
+                .Append("SELECT DISTINCT([invoiceKey])")
+                .Append("FROM [merchInvoice2EntityCollection]")
+                .Append(
+                    "WHERE [merchInvoice2EntityCollection].[entityCollectionKey] = @eckey",
+                    new { @eckey = collectionKey })
+                .Append(")");
 
             return GetPagedKeys(page, itemsPerPage, sql, orderExpression, sortDirection);
         }
@@ -279,7 +319,7 @@
                 .Append(")");
 
             return GetPagedKeys(page, itemsPerPage, sql, orderExpression, sortDirection);
-        }        
+        }
 
         /// <summary>
         /// The get keys not in collection.
@@ -311,12 +351,14 @@
         {
             var sql = new Sql();
             sql.Append("SELECT *")
-              .Append("FROM [merchInvoice]")
-               .Append("WHERE [merchInvoice].[pk] NOT IN (")
-               .Append("SELECT DISTINCT([invoiceKey])")
-               .Append("FROM [merchInvoice2EntityCollection]")
-               .Append("WHERE [merchInvoice2EntityCollection].[entityCollectionKey] = @eckey", new { @eckey = collectionKey })
-               .Append(")");
+                .Append("FROM [merchInvoice]")
+                .Append("WHERE [merchInvoice].[pk] NOT IN (")
+                .Append("SELECT DISTINCT([invoiceKey])")
+                .Append("FROM [merchInvoice2EntityCollection]")
+                .Append(
+                    "WHERE [merchInvoice2EntityCollection].[entityCollectionKey] = @eckey",
+                    new { @eckey = collectionKey })
+                .Append(")");
 
             return GetPagedKeys(page, itemsPerPage, sql, orderExpression, sortDirection);
         }
@@ -396,13 +438,13 @@
             var p = this.GetKeysFromCollection(collectionKey, page, itemsPerPage, orderExpression, sortDirection);
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -440,16 +482,88 @@
             var p = this.GetKeysFromCollection(collectionKey, term, page, itemsPerPage, orderExpression, sortDirection);
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         #endregion
+
+        /// <summary>
+        /// Gets distinct currency codes used in invoices.
+        /// </summary>
+        /// <returns>
+        /// The <see cref="IEnumerable{String}"/>.
+        /// </returns>
+        public IEnumerable<string> GetDistinctCurrencyCodes()
+        {
+            return
+                Database.Fetch<DistinctCurrencyCodeDto>("SELECT DISTINCT(currencyCode) from merchInvoice")
+                    .Select(x => x.CurrencyCode);
+        }
+
+        /// <summary>
+        ///  Gets the totals of invoices in a date range for a specific currency code.
+        /// </summary>
+        /// <param name="startDate">
+        /// The start date.
+        /// </param>
+        /// <param name="endDate">
+        /// The end date.
+        /// </param>
+        /// <param name="currencyCode">
+        /// The currency code.
+        /// </param>
+        /// <returns>
+        /// The sum of the invoice totals.
+        /// </returns>
+        public decimal SumInvoiceTotals(DateTime startDate, DateTime endDate, string currencyCode)
+        {
+            //var ends = endDate.AddDays(1);
+
+            const string SQL =
+                @"SELECT SUM([merchInvoice].total) FROM merchInvoice WHERE [merchInvoice].invoiceDate BETWEEN @starts and @ends AND [merchInvoice].currencyCode = @cc";
+
+            return Database.ExecuteScalar<decimal>(SQL, new { @starts = startDate, @ends = endDate, @cc = currencyCode });
+        }
+
+        /// <summary>
+        /// Gets the total of line items for a give SKU invoiced in a specific currency across the date range.
+        /// </summary>
+        /// <param name="startDate">
+        /// The start date.
+        /// </param>
+        /// <param name="endDate">
+        /// The end date.
+        /// </param>
+        /// <param name="currencyCode">
+        /// The currency code.
+        /// </param>
+        /// <param name="sku">
+        /// The SKU.
+        /// </param>
+        /// <returns>
+        /// The total of line items for a give SKU invoiced in a specific currency across the date range.
+        /// </returns>
+        public decimal SumLineItemTotalsBySku(DateTime startDate, DateTime endDate, string currencyCode, string sku)
+        {
+            //var ends = endDate.AddDays(1);
+
+            const string SQL = @"SELECT	SUM(T2.[quantity] * T2.[price]) AS Total
+                        FROM	[merchInvoice] T1
+                        INNER JOIN [merchInvoiceItem] T2 ON T1.[pk] = T2.[invoiceKey]
+                        WHERE T2.sku = @sku
+                        AND T1.currencyCode = @cc
+                        AND T1.invoiceDate BETWEEN @starts AND @ends";
+
+            return Database.ExecuteScalar<decimal>(
+                SQL,
+                new { @starts = startDate, @ends = endDate, @cc = currencyCode, @sku = sku });
+        }
 
         #region Filter Queries
 
@@ -478,12 +592,12 @@
         /// The <see cref="Page{IInvoice}"/>.
         /// </returns>
         public Page<IInvoice> GetInvoicesMatchingInvoiceStatus(
-           string searchTerm,
-           Guid invoiceStatusKey,
-           long page,
-           long itemsPerPage,
-           string orderExpression,
-           SortDirection sortDirection = SortDirection.Descending)
+            string searchTerm,
+            Guid invoiceStatusKey,
+            long page,
+            long itemsPerPage,
+            string orderExpression,
+            SortDirection sortDirection = SortDirection.Descending)
         {
             var p = this.GetInvoiceKeysMatchingInvoiceStatus(
                 searchTerm,
@@ -495,13 +609,13 @@
 
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -583,13 +697,13 @@
 
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -665,13 +779,13 @@
                 sortDirection);
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -704,12 +818,12 @@
         {
             var sql = new Sql();
             sql.Append("SELECT *")
-              .Append("FROM [merchInvoice]")
-              .Append("WHERE [merchInvoice].[pk] IN (")
-              .Append("SELECT DISTINCT(invoiceKey)")
-              .Append("FROM [merchOrder]")
-              .Append("WHERE [merchOrder].[orderStatusKey] = @osk", new { @osk = orderStatusKey })
-              .Append(")");
+                .Append("FROM [merchInvoice]")
+                .Append("WHERE [merchInvoice].[pk] IN (")
+                .Append("SELECT DISTINCT(invoiceKey)")
+                .Append("FROM [merchOrder]")
+                .Append("WHERE [merchOrder].[orderStatusKey] = @osk", new { @osk = orderStatusKey })
+                .Append(")");
 
             if (orderStatusKey.Equals(Core.Constants.DefaultKeys.OrderStatus.NotFulfilled))
             {
@@ -755,20 +869,20 @@
             SortDirection sortDirection = SortDirection.Descending)
         {
             var p = GetInvoiceKeysMatchingOrderStatus(
-               orderStatusKey,
-               page,
-               itemsPerPage,
-               orderExpression,
-               sortDirection);
+                orderStatusKey,
+                page,
+                itemsPerPage,
+                orderExpression,
+                sortDirection);
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -855,20 +969,20 @@
             SortDirection sortDirection = SortDirection.Descending)
         {
             var p = GetInvoiceKeysMatchingOrderStatus(
-              orderStatusKey,
-              page,
-              itemsPerPage,
-              orderExpression,
-              sortDirection);
+                orderStatusKey,
+                page,
+                itemsPerPage,
+                orderExpression,
+                sortDirection);
 
             return new Page<IInvoice>()
-            {
-                CurrentPage = p.CurrentPage,
-                ItemsPerPage = p.ItemsPerPage,
-                TotalItems = p.TotalItems,
-                TotalPages = p.TotalPages,
-                Items = p.Items.Select(Get).ToList()
-            };
+                       {
+                           CurrentPage = p.CurrentPage,
+                           ItemsPerPage = p.ItemsPerPage,
+                           TotalItems = p.TotalItems,
+                           TotalPages = p.TotalPages,
+                           Items = p.Items.Select(Get).ToList()
+                       };
         }
 
         /// <summary>
@@ -901,12 +1015,12 @@
         {
             var sql = new Sql();
             sql.Append("SELECT *")
-              .Append("FROM [merchInvoice]")
-              .Append("WHERE [merchInvoice].[pk] NOT IN (")
-              .Append("SELECT DISTINCT(invoiceKey)")
-              .Append("FROM [merchOrder]")
-              .Append("WHERE [merchOrder].[orderStatusKey] != @osk", new { @osk = orderStatusKey })
-              .Append(")");
+                .Append("FROM [merchInvoice]")
+                .Append("WHERE [merchInvoice].[pk] NOT IN (")
+                .Append("SELECT DISTINCT(invoiceKey)")
+                .Append("FROM [merchOrder]")
+                .Append("WHERE [merchOrder].[orderStatusKey] != @osk", new { @osk = orderStatusKey })
+                .Append(")");
 
             return GetPagedKeys(page, itemsPerPage, sql, orderExpression, sortDirection);
         }
@@ -966,17 +1080,16 @@
         /// </returns>
         protected override IInvoice PerformGet(Guid key)
         {
-            var sql = GetBaseQuery(false)
-              .Where(GetBaseWhereClause(), new { Key = key });
+            var sql = GetBaseQuery(false).Where(GetBaseWhereClause(), new { Key = key });
 
             var dto = Database.Fetch<InvoiceDto, InvoiceIndexDto, InvoiceStatusDto>(sql).FirstOrDefault();
 
-            if (dto == null)
-                return null;
-            
+            if (dto == null) return null;
+
             var lineItems = GetLineItemCollection(key);
             var orders = GetOrderCollection(key);
-            var factory = new InvoiceFactory(lineItems, orders);
+            var notes = this.GetNotes(key);
+            var factory = new InvoiceFactory(lineItems, orders, notes);
             return factory.BuildEntity(dto);
         }
 
@@ -1041,11 +1154,11 @@
         {
             var sql = new Sql();
             sql.Select(isCount ? "COUNT(*)" : "*")
-               .From<InvoiceDto>()
-               .InnerJoin<InvoiceIndexDto>()
-               .On<InvoiceDto, InvoiceIndexDto>(left => left.Key, right => right.InvoiceKey)
-               .InnerJoin<InvoiceStatusDto>()
-               .On<InvoiceDto, InvoiceStatusDto>(left => left.InvoiceStatusKey, right => right.Key);
+                .From<InvoiceDto>(SqlSyntax)
+                .InnerJoin<InvoiceIndexDto>(SqlSyntax)
+                .On<InvoiceDto, InvoiceIndexDto>(SqlSyntax, left => left.Key, right => right.InvoiceKey)
+                .InnerJoin<InvoiceStatusDto>(SqlSyntax)
+                .On<InvoiceDto, InvoiceStatusDto>(SqlSyntax, left => left.InvoiceStatusKey, right => right.Key);
 
             return sql;
         }
@@ -1070,14 +1183,15 @@
         protected override IEnumerable<string> GetDeleteClauses()
         {
             var list = new List<string>
-            {
-                "DELETE FROM merchAppliedPayment WHERE invoiceKey = @Key",
-                "DELETE FROM merchInvoiceItem WHERE invoiceKey = @Key",
-                "DELETE FROM merchInvoiceIndex WHERE invoiceKey = @Key",
-                "DELETE FROM merchOfferRedeemed WHERE invoiceKey = @Key",
-                "DELETE FROM merchInvoice2EntityCollection WHERE invoiceKey = @Key",
-                "DELETE FROM merchInvoice WHERE pk = @Key"
-            };
+                           {
+                               "DELETE FROM merchNote WHERE entityKey = @Key",
+                               "DELETE FROM merchAppliedPayment WHERE invoiceKey = @Key",
+                               "DELETE FROM merchInvoiceItem WHERE invoiceKey = @Key",
+                               "DELETE FROM merchInvoiceIndex WHERE invoiceKey = @Key",
+                               "DELETE FROM merchOfferRedeemed WHERE invoiceKey = @Key",
+                               "DELETE FROM merchInvoice2EntityCollection WHERE invoiceKey = @Key",
+                               "DELETE FROM merchInvoice WHERE pk = @Key"
+                           };
 
             return list;
         }
@@ -1090,13 +1204,16 @@
         /// </param>
         protected override void PersistNewItem(IInvoice entity)
         {
+
             ((Entity)entity).AddingEntity();
 
-            var factory = new InvoiceFactory(entity.Items, new OrderCollection());
+            var factory = new InvoiceFactory(entity.Items, new OrderCollection(), entity.Notes);
             var dto = factory.BuildDto(entity);
 
             Database.Insert(dto);
             entity.Key = dto.Key;
+
+            SaveNotes(entity);
 
             Database.Insert(dto.InvoiceIndexDto);
             ((Invoice)entity).ExamineId = dto.InvoiceIndexDto.Id;
@@ -1114,9 +1231,11 @@
         /// </param>
         protected override void PersistUpdatedItem(IInvoice entity)
         {
+            SaveNotes(entity);
+
             ((Entity)entity).UpdatingEntity();
 
-            var factory = new InvoiceFactory(entity.Items, entity.Orders);
+            var factory = new InvoiceFactory(entity.Items, entity.Orders, entity.Notes);
             var dto = factory.BuildDto(entity);
 
             Database.Update(dto);
@@ -1124,6 +1243,48 @@
             _invoiceLineItemRepository.SaveLineItem(entity.Items, entity.Key);
 
             entity.ResetDirtyProperties();
+        }
+
+        /// <summary>
+        /// Saves the notes.
+        /// </summary>
+        /// <param name="entity">
+        /// The entity.
+        /// </param>
+        private void SaveNotes(IInvoice entity)
+        {
+            var query = Querying.Query<INote>.Builder.Where(x => x.EntityKey == entity.Key);
+            var existing = _noteRepository.GetByQuery(query);
+
+            var removers = existing.Where(x => !Guid.Empty.Equals(x.Key) && entity.Notes.All(y => y.Key != x.Key)).ToArray();
+
+            foreach (var remover in removers) _noteRepository.Delete(remover);
+
+            var updates = entity.Notes.Where(x => removers.All(y => y.Key != x.Key));
+
+            var factory = new NoteFactory();
+            foreach (var u in updates)
+            {
+                u.EntityKey = entity.Key;
+
+                if (u.HasIdentity)
+                {
+                    ((Note)u).UpdatingEntity();
+                    var dto = factory.BuildDto(u);
+                    Database.Update(dto);
+                }
+                else
+                {
+                    ((Note)u).AddingEntity();
+                    var dto = factory.BuildDto(u);
+                    Database.Insert(dto);
+                    u.Key = dto.Key;
+                }
+
+                var cacheKey = Cache.CacheKeys.GetEntityCacheKey<INote>(u.Key);
+                RuntimeCache.ClearCacheItem(cacheKey);
+            }
+
         }
 
         /// <summary>
@@ -1135,7 +1296,7 @@
         /// <returns>
         /// The <see cref="Sql"/>.
         /// </returns>
-        private static Sql BuildInvoiceSearchSql(string searchTerm)
+        private Sql BuildInvoiceSearchSql(string searchTerm)
         {
             searchTerm = searchTerm.Replace(",", " ");
             var invidualTerms = searchTerm.Split(' ');
@@ -1158,10 +1319,19 @@
 
 
             var sql = new Sql();
-            sql.Select("*").From<InvoiceDto>();
+
+            sql.Select("*").From<InvoiceDto>(SqlSyntax);
+
             if (numbers.Any() && terms.Any())
             {
-                sql.Where("billToName LIKE @term OR billToEmail LIKE @email OR invoiceNumber IN (@invNo)", new { @term = string.Format("%{0}%", string.Join("% ", terms)).Trim(), @email = string.Format("%{0}%", string.Join("% ", terms)).Trim(), @invNo = numbers.ToArray() });
+                sql.Where(
+                    "billToName LIKE @term OR billToEmail LIKE @email OR invoiceNumber IN (@invNo)",
+                    new
+                        {
+                            @term = string.Format("%{0}%", string.Join("% ", terms)).Trim(),
+                            @email = string.Format("%{0}%", string.Join("% ", terms)).Trim(),
+                            @invNo = numbers.ToArray()
+                        });
             }
             else if (numbers.Any())
             {
@@ -1169,7 +1339,13 @@
             }
             else
             {
-                sql.Where("billToName LIKE @term OR billToEmail LIKE @term", new { @term = string.Format("%{0}%", string.Join("% ", terms)).Trim(), @email = string.Format("%{0}%", string.Join("% ", terms)).Trim() });
+                sql.Where(
+                    "billToName LIKE @term OR billToEmail LIKE @term",
+                    new
+                        {
+                            @term = string.Format("%{0}%", string.Join("% ", terms)).Trim(),
+                            @email = string.Format("%{0}%", string.Join("% ", terms)).Trim()
+                        });
             }
 
             return sql;
@@ -1187,9 +1363,7 @@
         private LineItemCollection GetLineItemCollection(Guid invoiceKey)
         {
             var sql = new Sql();
-            sql.Select("*")
-                .From<InvoiceItemDto>()
-                .Where<InvoiceItemDto>(x => x.ContainerKey == invoiceKey);
+            sql.Select("*").From<InvoiceItemDto>(SqlSyntax).Where<InvoiceItemDto>(x => x.ContainerKey == invoiceKey);
 
             var dtos = Database.Fetch<InvoiceItemDto>(sql);
 
@@ -1223,7 +1397,31 @@
                 collection.Add(order);
             }
 
-            return collection;            
-        }       
+            return collection;
+        }
+
+        /// <summary>
+        /// Gets the notes collection for an invoice.
+        /// </summary>
+        /// <param name="invoiceKey">
+        /// The invoice key.
+        /// </param>
+        /// <returns>
+        /// The <see cref="IEnumerable{INote}"/>.
+        /// </returns>
+        private IEnumerable<INote> GetNotes(Guid invoiceKey)
+        {
+            var query = Querying.Query<INote>.Builder.Where(x => x.EntityKey == invoiceKey);
+            var notes = _noteRepository.GetByQuery(query);
+
+            var collection = new List<INote>();
+
+            foreach (var note in notes.OrderByDescending(x => x.CreateDate))
+            {
+                collection.Add(note);
+            }
+
+            return collection;   
+        }
     }
 }

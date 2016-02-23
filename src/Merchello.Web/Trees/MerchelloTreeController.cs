@@ -28,7 +28,7 @@
     /// </summary>
     [Tree("merchello", "merchello", "Merchello")]
     [PluginController("Merchello")]
-    public class MerchelloTreeController : TreeController
+    public sealed class MerchelloTreeController : TreeController
     {
         /// <summary>
         /// The dialogs path.
@@ -111,10 +111,7 @@
 
             collection.AddRange(
                 currentTree != null
-                    ? currentTree.Id == "reports" ? 
-                        GetAttributeDefinedTrees(queryStrings) :  
-    
-                        _collectiontrees.Contains(splitId.CollectionId) ?
+                    ? _collectiontrees.Contains(splitId.CollectionId) ?
 
                         this.GetTreeNodesForCollections(splitId.CollectionId, MakeCollectionRoutePathId(splitId.CollectionId, splitId.CollectionKey), queryStrings) 
 
@@ -153,20 +150,20 @@
             if (id == "products")
             {
                 menu.Items.Add<NewCollectionAction>(
-                    _textService.Localize(string.Format("merchelloVariant/newProduct"), _culture),
+                    _textService.Localize("merchelloVariant/newProduct", _culture),
                     false).NavigateToRoute("merchello/merchello/productedit/create");
 
                 menu.Items.Add<NewProductContentTypeAction>(
-                    _textService.Localize(string.Format("merchelloDetachedContent/productContentType"), _culture),
+                    _textService.Localize("merchelloDetachedContent/productContentType", _culture),
                     false)
-                    .LaunchDialogView(DialogsPath + "productcontenttype.add.html", _textService.Localize(string.Format("merchelloDetachedContent/productContentType"), _culture));
+                    .LaunchDialogView(DialogsPath + "productcontenttype.add.html", _textService.Localize("merchelloDetachedContent/productContentType", _culture));
             }
 
             if (id == "customers")
             {
                 menu.Items.Add<NewCollectionAction>(
-                    _textService.Localize(string.Format("merchelloCustomers/newCustomer"), _culture), false)
-                    .LaunchDialogView(DialogsPath + "customer.newcustomer.html", _textService.Localize(string.Format("merchelloCustomers/newCustomer"), _culture));
+                    _textService.Localize("merchelloCustomers/newCustomer", _culture), false)
+                    .LaunchDialogView(DialogsPath + "customer.newcustomer.html", _textService.Localize("merchelloCustomers/newCustomer", _culture));
             }
 
             if (id == "marketing")
@@ -502,7 +499,6 @@
         {
             var hasSubs = tree.SubTree != null && tree.SubTree.GetTrees().Any();
 
-            if (tree.Id == "reports" && hasSubs == false) hasSubs = ReportApiControllerResolver.Current.ResolvedTypes.Any();
             if (_collectiontrees.Contains(tree.Id))
                 hasSubs = this.GetCollectionProviderInfo(tree.Id).ManagedCollections.Any()
                           || tree.SelfManagedEntityCollectionProviderCollections.EntityCollectionProviders().Any();
@@ -550,7 +546,8 @@
             if (!types.Any()) return new TreeNode[] { };
 
             var atts = types.Select(x => x.GetCustomAttribute<BackOfficeTreeAttribute>(true)).OrderBy(x => x.SortOrder);
-
+            
+            // TODO RSS refactor
             return
                 atts.Select(
                     att =>
@@ -561,7 +558,10 @@
                         att.Title,
                         att.Icon,
                         false,
-                        string.Format("{0}{1}", "/merchello/merchello/reports.viewreport/", att.RoutePath)));
+                        att.RoutePath.StartsWith("~/App_Plugins/", StringComparison.InvariantCultureIgnoreCase) ||
+                        att.RoutePath.StartsWith("#")
+                        ? att.RoutePath 
+                        : string.Format("{0}{1}", "/merchello/merchello/reports.viewreport/", att.RoutePath)));
         }
 
         /// <summary>

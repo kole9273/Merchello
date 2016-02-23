@@ -120,7 +120,7 @@ namespace Merchello.Tests.IntegrationTests.Services.Product
         /// <summary>
         /// Test to verify a product can be retrieved with 3 options each with choices
         /// </summary>
-        [Test]
+        [Test, Category("LongRunning")]
         public void Can_Retrieve_A_Product_With_3_Options_With_Choices()
         {
             //// Arrange
@@ -362,7 +362,6 @@ namespace Merchello.Tests.IntegrationTests.Services.Product
         /// <summary>
         /// Relates to http://issues.merchello.com/youtrack/issue/M-733
         /// </summary>
-        [Test]
         public void Simulates_IssueM733()
         {
             //// Arrange
